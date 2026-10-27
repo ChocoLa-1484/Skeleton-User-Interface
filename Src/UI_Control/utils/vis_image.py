@@ -36,11 +36,12 @@ class ImageDrawer():
         self.region = [(100, 250), (450, 600)]
 
 
-    def drawInfo(self, img:np.ndarray, frame_num:int=None, kpt_buffer:list = None, countdown_time:int = None):
+    def drawInfo(self, img:np.ndarray, frame_num:int=None, kpt_buffer:list = None, countdown_time:int = None,
+                 show_bbox=None, show_skeleton=None, is_select:bool=True):
         if img is None:
             return
         image = img.copy()
-        curr_person_df = self.pose_estimater.getPersonDf(frame_num = frame_num, is_select=True)
+        curr_person_df = self.pose_estimater.getPersonDf(frame_num = frame_num, is_select=is_select)
         if self.show_region:
             image = self.drawRegion(image)
 
@@ -53,10 +54,10 @@ class ImageDrawer():
         if self.show_grid :
             image = self.drawGrid(image)
 
-        if self.show_bbox:
+        if (self.show_bbox if show_bbox is None else show_bbox):
             image = self.drawBbox(image, curr_person_df)
 
-        if self.show_skeleton:
+        if (self.show_skeleton if show_skeleton is None else show_skeleton):
             image = self.drawPointsandSkeleton(image, curr_person_df, self.pose_estimater.joints['haple']['skeleton_links'], points_palette_samples=10)
 
         return image

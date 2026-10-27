@@ -1,5 +1,7 @@
-# Hitter-Skeleton-User-Interface requirements
+# Skeleton-User-Interface requirements
 # Python 3.8 / CUDA 11.8 / torch 2.0.1+cu118
+# Run from the project root after installing PyTorch (README Step 2).
+# CSV export uses Python's built-in csv module; no extra package is needed.
 
 # Image processing
 numpy==1.24.4
@@ -40,6 +42,7 @@ json_tricks
 chumpy
 
 # Visualization
+PyQt5==5.15.11
 pyqtgraph==0.13.3
 tensorboard==2.14.0
 vispy
@@ -60,9 +63,9 @@ ultralytics==8.3.96
 
 # NOTE: install separately - NOT via this file
 # torch/torchvision/torchaudio : see README Step 2
-# PyQt5                        : pip install PyQt5==5.15.11
 # mmcv/mmdet/mmengine           : via openmim, see README Step 5
 # mmpose                        : python setup.py develop --no-deps in Src/mmpose_main
 # mmpretrain                   : python setup.py develop --no-deps in Src/mmpretrain_main
 # faiss-gpu                    : conda install -c conda-forge faiss-gpu
 # cython_bbox                  : pip install cython_bbox
+# Optional FLIR camera support: EasyPySpin + vendor Spinnaker SDK (not needed for video files)

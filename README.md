@@ -58,16 +58,21 @@ pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https
 
 ### Step 3 — 安裝基本套件
 
+在專案根目錄執行，包含 PyQt5 GUI 所需套件。CSV 匯出使用 Python 內建的 `csv` 模組，不需額外安裝套件。
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ---
 
-### Step 4 — 安裝 PyQt5
+### Step 4 — 驗證 PyQt5
+
+PyQt5 已包含在 `requirements.txt`，完成 Step 3 後可確認安裝版本：
 
 ```bash
-pip install PyQt5==5.15.11
+python -c "from PyQt5.QtCore import PYQT_VERSION_STR; print(PYQT_VERSION_STR)"
+# 應輸出: 5.15.11
 ```
 
 ---
@@ -89,7 +94,7 @@ Windows 上 `.mim` 資料夾有權限問題，**必須先刪除再安裝**：
 
 ```powershell
 # 回到專案根目錄（若不在根目錄請先 cd 過去）
-cd C:\Mo\program\Hitter-Skeleton-User-Interface_zm
+cd C:\Workspace\Skeleton-User-Interface
 
 # 刪除 .mim 資料夾（若不存在會顯示錯誤可忽略）
 Remove-Item -Recurse -Force Src\mmpose_main\mmpose\.mim
@@ -108,7 +113,7 @@ ViTPose 的 Vision Transformer backbone 需要此套件，同樣需先刪除 `.m
 
 ```powershell
 # 回到專案根目錄
-cd C:\Mo\program\Hitter-Skeleton-User-Interface_zm
+cd C:\Workspace\Skeleton-User-Interface
 
 # 刪除 .mim 資料夾（若不存在會顯示錯誤可忽略）
 Remove-Item -Recurse -Force Src\mmpretrain_main\mmpretrain\.mim
@@ -222,8 +227,8 @@ python main.py
 | 按鈕 | 功能 |
 |------|------|
 | **載入原始影片** | 開啟檔案選擇對話框，載入未處理的 MP4 影片。影片載入後會自動逐幀解析並顯示第 0 幀。 |
-| **處理和儲存** | 從第 0 幀開始執行骨架偵測，播放完畢後自動將結果儲存為骨架影片（`_skeleton.mp4`）與 JSON 資料到 `Db/Record/`。 |
-| **載入處理過的影片** | 載入已處理完成的影片，並同時讀取對應的 JSON 骨架資料，直接顯示骨架結果，不需重新計算。 |
+| **處理和儲存** | 從第 0 幀開始處理，抵達最後一幀後補做尚未處理的影格，再將原畫面影片、人物框＋骨架影片（`_Sk26.mp4`）、JSON 與 CSV 儲存至 `Db/Record/{影片名稱}/`。 |
+| **載入處理過的影片** | 載入影片及對應的骨架 JSON，直接顯示人物框與骨架，不重新執行模型；支援原畫面影片與 `_Sk26.mp4`。 |
 
 #### 播放控制區
 
@@ -240,9 +245,11 @@ python main.py
 
 | Checkbox | 功能 |
 |----------|------|
-| **人體骨架** | 顯示 / 隱藏骨架連線（橘色 = 右側，藍色 = 左側） |
-| **人物框** | 顯示 / 隱藏 YOLO 偵測到的人體 Bounding Box |
-| **選擇人** | 勾選後，點擊畫面中的人物可選定追蹤目標（鎖定 Person ID） |
+| **人體骨架** | 顯示／隱藏預覽骨架，同時啟用／停用預覽時的骨架偵測；不影響儲存前補做未處理影格 |
+| **人物框** | 立即顯示／隱藏預覽中的人物框與 ID，暫停時也會更新；需已有該影格的偵測資料 |
+| **選擇人** | 勾選後顯示可選人物框，左鍵點選人物可指定追蹤 ID；原始影片只對該人物執行骨架估計，取消勾選則恢復全部人物。已處理影片則篩選已儲存的人物資料。 |
+
+輸出的 `_Sk26.mp4` 固定啟用人物框與骨架，不受預覽顯示開關影響。未選人時對所有有效追蹤人物估計骨架；指定人物後，儲存前會以目前選定的追蹤 ID 補齊全片的骨架估計，影片、JSON 與 CSV 都只保留該人物的結果。
 
 ---
 
@@ -258,24 +265,30 @@ python main.py
 
 點擊「**處理和儲存**」→ 程式會自動從第 0 幀開始播放並逐幀進行骨架偵測。
 
-> 偵測中可以看到畫面上陸續出現骨架，右上角顯示 FPS 資訊。偵測速度取決於 GPU 效能與影片解析度。
+> 偵測速度取決於 GPU 效能、人物數與影片解析度。FPS 顯示骨架處理計時結果，已處理影片顯示「—」；不代表原影片幀率或完整輸出速度。
 
 **③ 選取追蹤目標（選擇人）**
 
-1. 確認「**人體骨架**」已勾選
-2. 勾選「**選擇人**」
-3. 用滑鼠左鍵點擊畫面中想追蹤的運動員
+1. 載入原始影片，勾選「**選擇人**」，程式會啟用骨架顯示並顯示可選人物框
+2. 用滑鼠左鍵點擊想分析的人物框，該影格會立即改為只估計此人物的骨架
+3. 點擊「**處理和儲存**」，從頭處理並輸出此人物的結果；可點選其他人物切換目標
+4. 取消「**選擇人**」可恢復對所有有效追蹤人物進行骨架估計
 
-> 選定後，該人物的骨架會被鎖定追蹤，Person ID 固定不變。
+> 人物 ID 使用 BoTSORT 追蹤結果，拖曳進度條時會依時間順序補做前面的偵測與追蹤，以維持 ID 對應。遮擋或離開畫面仍可能導致追蹤中斷；選定 ID 未出現時，不會改以其他人物或整張畫面估計骨架。
 
 **④ 儲存結果**
 
-- 影片播放到最後一幀時自動儲存，或點擊「**處理和儲存**」手動觸發
-- 輸出檔案儲存至 `Db/Record/` 資料夾
+- 點擊「**處理和儲存**」後抵達最後一幀會自動儲存；一般預覽或選人不會自行觸發儲存
+- 儲存前會補做尚未處理的影格，這個階段可能需要等待
+- 輸出檔案儲存至 `Db/Record/{影片名稱}/` 資料夾，同名檔案會覆寫
 
-**⑤ 載入已處理的影片（下次快速開啟）**
+**⑤ 檢視輸出與重新載入**
 
-下次開啟相同影片時，點擊「**載入處理過的影片**」，程式會自動讀取 JSON 骨架資料，直接顯示結果，不需重新偵測。
+可直接使用影片播放器開啟 `{影片名稱}_Sk26.mp4` 檢視人物框與骨架，或使用 Excel 開啟 CSV 分析座標。
+
+使用「**載入處理過的影片**」選擇輸出資料夾中的 `{影片名稱}.mp4` 或 `{影片名稱}_Sk26.mp4`，兩者都會對應到同資料夾的 `{影片名稱}.json`，不再需要舊版球棒／揮棒 JSON。建議選擇未繪製標記的 `{影片名稱}.mp4`，以便自由切換人物框與骨架顯示；`_Sk26.mp4` 本身已包含的標記無法移除。
+
+載入後會直接顯示儲存結果，缺少人物的影格也不會重新偵測。若 JSON 不存在或缺少必要欄位，程式會顯示錯誤訊息。此模式的「選擇人」只篩選 JSON 中已有的人物；若要重新估計或分析未儲存的人物，請以「**載入原始影片**」開啟未繪製標記的影片。CSV 目前僅供匯出分析，不作為重新載入來源。
 
 ---
 
@@ -301,29 +314,34 @@ python main.py
 
 ## 輸出格式
 
-分析完成後，結果儲存至 `Db/Record/`：
+分析完成後，結果儲存至 `Db/Record/{影片名稱}/`：
 
 | 檔案 | 說明 |
 |------|------|
-| `{影片名稱}_skeleton.mp4` | 畫有骨架的影片 |
+| `{影片名稱}.mp4` | 由載入的影格重新編碼的原畫面影片，未繪製骨架與人物框 |
+| `{影片名稱}_Sk26.mp4` | 逐幀繪製人物框與骨架；指定人物時只輸出該人物，不受預覽顯示開關影響 |
 | `{影片名稱}.json` | 逐幀骨架資料（含 Bounding Box + 26 關節點座標） |
+| `{影片名稱}.csv` | 每列一個影格／人物／關節點，含人物框、座標、信心值與人工修改標記 |
 
-JSON 格式範例：
+CSV 與 JSON 同時儲存。CSV 採用 UTF-8 BOM 編碼，可直接以 Excel 開啟；欄位為 `frame_number`（從 0 開始）、`person_id`、`bbox_x1`、`bbox_y1`、`bbox_x2`、`bbox_y2`、`keypoint_id`（0–25）、`keypoint_name`、`x`、`y`、`confidence`、`is_modified`（0：未修改；1：人工修改）。座標以原始影片像素為單位；沒有偵測資料時僅輸出標題列。
+
+兩份 MP4 都由 OpenCV 逐幀寫入，不保留原影片音軌。原畫面影片也不是來源檔案的逐位元複製。
+
+「處理和儲存」會從第 0 幀開始處理，儲存前會補做尚未處理的影格。輸出的骨架影片固定啟用人物框與骨架；模型未偵測到人物的影格仍保留原畫面，不補造座標。
+
+JSON 使用 records 陣列，每筆為一個影格中的一個人物。以下範例僅節錄前兩個關節點，完整資料為 26 點；每點依序為 `[x, y, confidence, is_modified]`：
 ```json
-{
-  "frame_0": {
-    "persons": [
-      {
-        "person_id": 1,
-        "bbox": [x1, y1, x2, y2],
-        "keypoints": [
-          [x, y, confidence],
-          "..."
-        ]
-      }
-    ]
+[
+  {
+    "person_id": 1,
+    "bbox": [100.0, 50.0, 300.0, 450.0],
+    "keypoints": [
+      [200.0, 80.0, 0.98, 0.0],
+      [195.0, 75.0, 0.95, 1.0]
+    ],
+    "frame_number": 0
   }
-}
+]
 ```
 
 ---
@@ -333,7 +351,7 @@ JSON 格式範例：
 | 攝影機類型 | 狀態 | 說明 |
 |-----------|------|------|
 | 影片檔（MP4 等）| ✅ 支援 | 主要使用方式 |
-| FLIR / Point Grey 工業相機 | ⚠️ 需額外安裝 | 需安裝 [Spinnaker SDK](https://www.flir.com/products/spinnaker-sdk/) + `EasyPySpin` |
+| FLIR / Point Grey 工業相機 | ⚠️ 僅有底層擷取程式 | 需安裝 Spinnaker SDK + `EasyPySpin`；目前主視窗未啟用相機 Tab |
 | Sony AX700 / 一般相機（HDMI 擷取卡）| 🔧 規劃中 | 透過 `cv2.VideoCapture()` 讀取，需新增 `SonyCaptureThread` |
 
 ---
@@ -341,7 +359,7 @@ JSON 格式範例：
 ## 專案結構
 
 ```
-Hitter-Skeleton-User-Interface/
+Skeleton-User-Interface/
 ├── Db/
 │   ├── pretrain/              # 模型權重檔
 │   └── Record/                # 分析輸出（自動建立）
@@ -353,11 +371,13 @@ Hitter-Skeleton-User-Interface/
 │   │   ├── skeleton/          # 骨架偵測核心（ViTPose + YOLO + tracker）
 │   │   ├── cv_utils/          # 影像控制與執行緒
 │   │   ├── utils/             # 分析、濾波、視覺化工具
-│   │   └── camera_objects/    # 攝影機介面（擴充用）
+│   │   └── camera_config/     # 攝影機設定
+│   ├── mmengine_main/        # OpenMMLab mmengine 原始碼
+│   ├── mmpretrain_main/      # ViTPose backbone（editable 安裝）
 │   ├── mmpose_main/           # OpenMMLab mmpose（本地版本，editable 安裝）
 │   ├── mmyolo_main/           # OpenMMLab mmyolo
 │   ├── tracker/               # BoTSORT 多目標追蹤器
-│   └── cython-bbox/           # Bounding Box 計算工具
+│   └── cython_bbox-0.1.3/     # Bounding Box 計算工具
 ├── requirements.txt           # Python 套件依賴清單
 ├── CLAUDE.md                  # 開發環境紀錄（給 Claude Code 使用）
 └── README.md                  # 本文件

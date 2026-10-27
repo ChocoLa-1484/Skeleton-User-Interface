@@ -44,6 +44,8 @@ class PoseEstimater:
         self.fps = None
         self.person_data = []
         self.processed_frames = set()
+        self.processed_targets = {}
+        self.tracked_frames = {}
         self.fps_timer = FPSTimer()
         self.smooth_filter = OneEuroFilter()
         self.is_detect = False
@@ -134,9 +136,14 @@ class PoseEstimater:
         }
 
     def mergePersonData(self, pred_instances, person_ids: list, frame_num: int = None):
-        person_bboxes = pred_instances['bboxes']
         if frame_num is None:
             self.person_data = []
+        else:
+            self.person_data = [row for row in self.person_df.to_dict('records')
+                                if row['frame_number'] != frame_num]
+        if pred_instances is None:
+            return pd.DataFrame(self.person_data, columns=['person_id', 'bbox', 'keypoints', 'frame_number'])
+        person_bboxes = pred_instances['bboxes']
 
         for person, pid, bbox in zip(pred_instances, person_ids, person_bboxes):
             keypoints_data = np.hstack((
@@ -178,17 +185,23 @@ class PoseEstimater:
         
   
     def detectKpt(self, image:np.ndarray, frame_num:int = None, is_video:bool = False, is_processed:bool=False):
+        if is_processed:
+            return image, self.person_df, 0, self.bat_df
         if not self.is_detect:
             return image, pd.DataFrame(), 0, pd.DataFrame()
+        self.fps_timer.tic()
         fps = 0
         if is_video: 
             #影片處理方式
-            if frame_num not in self.processed_frames:
-                pred_instances, person_ids, bat_bbox, bat_mask= self.processImage(self.model, image, select_id=self.person_id)
+            if (frame_num not in self.processed_frames or
+                    self.processed_targets.get(frame_num) != self.person_id):
+                pred_instances, person_ids, bat_bbox, bat_mask= self.processImage(
+                    self.model, image, select_id=self.person_id, frame_num=frame_num)
                 self.person_df = self.mergePersonData(pred_instances, person_ids, frame_num)
                 self.bat_df = self.mergeBatData(bat_bbox, bat_mask, frame_num)
                 self.smoothKpt(person_ids, frame_num)
                 self.processed_frames.add(frame_num)
+                self.processed_targets[frame_num] = self.person_id
             if self.kpt_id is not None:
                 self.kpt_buffer = self.updateKptBuffer(frame_num)
         else:
@@ -258,79 +271,45 @@ class PoseEstimater:
             # 更新當前幀的數據
             self.person_df.at[curr_person_data.index[0], 'keypoints'] = smoothed_kpts
            
-    def processImage(self, model, img, select_id=None):
-        """
-        處理單張圖像，進行物件偵測、跟蹤和姿態估計。
+    def trackFrame(self, model, image, frame_num=None):
+        if frame_num is not None and frame_num in self.tracked_frames:
+            return self.tracked_frames[frame_num]
+        detections = model.detector.predict(image, task='segment', classes=[0])[0]
+        boxes = detections.boxes.xyxy.cpu().numpy()
+        scores = detections.boxes.conf.cpu().numpy().reshape(-1, 1)
+        tracker_input = np.hstack((boxes, scores, np.zeros((len(boxes), 1))))
+        targets = model.tracker.update(tracker_input, image.copy())
+        boxes, person_ids = self.filterValidTargets(targets)
+        persons = pd.DataFrame([
+            {'person_id': person_id, 'bbox': bbox}
+            for bbox, person_id in zip(boxes, person_ids)
+        ], columns=['person_id', 'bbox'])
+        if frame_num is not None:
+            self.tracked_frames[frame_num] = persons
+        return persons
 
-        Args:
-            model (dict): 包含檢測器、姿態估計器和跟蹤器的模型。
-            img (np.ndarray): 輸入的圖像。
-            select_id (int, optional): 選擇指定的追蹤ID，如果為None，則處理所有目標。
+    def ensureTrackedThrough(self, video_frames, frame_num):
+        # Feed the tracker in chronological order, even when the slider skips frames.
+        for index in range(len(self.tracked_frames), frame_num + 1):
+            self.trackFrame(self.model, video_frames[index], index)
 
-        Returns:
-            Tuple: 預測的姿態實例和在線的追蹤ID。
-        """
-       
-        # 進行物件偵測
-        # YOLO for detection
-        yolo_model = model.detector
-        result = yolo_model.predict(img, task= 'segment', classes=[0, 34])
-        detections = result[0]
-        # human
-        human_bboxes = []
-        humane_scores = []
-        # bat
-        bat_bboxes = []
-        bat_masks = []
-        bat_scores = []
+    def getSelectablePersons(self, frame_num):
+        if frame_num in self.tracked_frames:
+            return self.tracked_frames[frame_num]
+        return self.getPersonDf(frame_num=frame_num)
 
-        for det in detections:
-            if (int(det.boxes.cls[0]) == 0) :  # human
-                human_bboxes.append(np.array(det.boxes.xyxy[0].cpu().numpy().flatten()))
-                humane_scores.append(det.boxes.conf)
-            else: # bat
-                bat_bboxes.append(np.array(det.boxes.xyxy[0].cpu().numpy().flatten()))
-                bat_masks.append(np.array(det.masks.xy))
-                bat_scores.append(det.boxes.conf)
-        # human tracker
-        # online_targets = model.tracker.update(
-        #     np.hstack((np.vstack(human_bboxes), np.full((np.vstack(human_bboxes).shape[0], 2), [0.9, 0]))), img.copy()
-        # )
-
-        online_targets = []
-        track_id = 1  # 手动编号 track_id
-
-        for bbox in human_bboxes:
-            x1, y1, x2, y2 = bbox  # bbox 是 [x1, y1, x2, y2]
-            w = x2 - x1
-            h = y2 - y1
-            tlwh = [x1, y1, w, h]  # 转换为 tlwh 格式
-            
-            online_targets.append({
-                'tlwh': tlwh,   # 原本 tracker 提供的 tlwh
-                'track_id': track_id  # 人工分配 track_id
-            })
-            track_id += 1  # 递增 ID
-
-        # 過濾出有效的邊界框和追蹤ID
-        # online_bbox, online_ids = self.filterValidTargets(online_targets, select_id)
-        online_bbox, online_ids = self.filterBiggestTargets(online_targets, select_id)
-        # 姿態估計
-        pose_results = inference_topdown(model.pose_estimator, img, np.array(online_bbox))
+    def processImage(self, model, img, select_id=None, frame_num=None):
+        persons = self.trackFrame(model, img, frame_num)
+        if select_id is not None:
+            persons = persons.loc[persons['person_id'] == select_id]
+        if persons.empty:
+            # Empty boxes would make inference_topdown estimate the entire image.
+            return None, [], [], None
+        boxes = np.asarray(persons['bbox'].tolist())
+        person_ids = persons['person_id'].tolist()
+        pose_results = inference_topdown(model.pose_estimator, img, boxes)
         data_samples = merge_data_samples(pose_results)
-    
-        online_bat_bbox = []
-        online_bat_mask = None
-
-        # 當有偵測到Bat
-        # if len(bat_bboxes):
-        #     online_targets_bat = model.tracker.update(
-        #             np.hstack((np.vstack(bat_bboxes), np.full((np.vstack(bat_bboxes).shape[0], 2), [0.9, 0]))), img.copy()
-        #     )
-        #     online_bat_bbox, online_bat_mask = self.filterBatBiggestTarget(online_targets_bat, bat_masks)
-
-        return data_samples.get('pred_instances', None), online_ids, online_bat_bbox, online_bat_mask
-
+        return data_samples.get('pred_instances', None), person_ids, [], None
 
     def filterBatBiggestTarget(self, online_targets, masks):
         # 看有沒有內容
@@ -403,56 +382,16 @@ class PoseEstimater:
 
 
     def filterValidTargets(self, online_targets, select_id: int = None):
-        """
-        過濾出有效的追蹤目標。
-
-        Args:
-            online_targets (List): 所有在線追蹤的目標。
-            select_id (int, optional): 選擇指定的追蹤ID。
-
-        Returns:
-            Tuple: 有效的邊界框和追蹤ID。
-        """
-        if not online_targets:
-            return [], []
-
-        # 將所有在線目標的邊界框和ID提取為兩個列表
-        tlwhs = []
-        track_ids = []
-
+        boxes, person_ids = [], []
         for target in online_targets:
-            tlwhs.append(target.tlwh)
-            track_ids.append(target.track_id)
-
-        # 將列表轉換為 NumPy array
-        tlwhs = np.array(tlwhs)
-        track_ids = np.array(track_ids)
-
-        # 將數據轉為張量並放到 GPU 上
-        tlwhs = torch.tensor(tlwhs, device='cuda')  # shape: (n, 4)
-        track_ids = torch.tensor(track_ids, device='cuda')  # shape: (n,)
-
-        # 計算面積 w * h
-        areas = tlwhs[:, 2] * tlwhs[:, 3]  # w * h
-
-        # 過濾面積大於 10 的邊界框
-        valid_mask = areas > 10
-
-        # 如果指定了 select_id，則進一步過濾
-        if select_id is not None:
-            valid_mask &= (track_ids == select_id)
-
-        # 過濾有效的邊界框和追蹤ID
-        valid_tlwhs = tlwhs[valid_mask]
-        valid_track_ids = track_ids[valid_mask]
-
-        # 將 (x1, y1, w, h) 轉為 (x1, y1, x2, y2)
-        valid_bbox = torch.cat([valid_tlwhs[:, :2], valid_tlwhs[:, :2] + valid_tlwhs[:, 2:4]], dim=1)
-
-        # 返回結果
-        return valid_bbox.cpu().tolist(), valid_track_ids.cpu().tolist()
-
-
+            x, y, width, height = target.tlwh
+            if width * height <= 10:
+                continue
+            if select_id is not None and target.track_id != select_id:
+                continue
+            boxes.append([float(x), float(y), float(x + width), float(y + height)])
+            person_ids.append(int(target.track_id))
+        return boxes, person_ids
 
     def filterBiggestTargets(self, online_targets, select_id: int = None):
         if not online_targets:
@@ -499,7 +438,7 @@ class PoseEstimater:
         max_bbox = [max_tlwh[0], max_tlwh[1], max_tlwh[0] + max_tlwh[2], max_tlwh[1] + max_tlwh[3]]
         max_id = valid_track_ids[max_idx]
 
-        return [max_bbox], [1]
+        return [max_bbox], [int(max_id)]
 
 
 
@@ -608,12 +547,12 @@ class PoseEstimater:
         return self.bat_df[self.bat_df['frame_number'] == frame_num]
 
 
-    def setProcessedData(self, person_df:pd.DataFrame, bat_df:pd.DataFrame):
-        if person_df.empty:
-            return
-        self.person_df = person_df
-        self.bat_df = bat_df
-        self.processed_frames = {frame_num for frame_num in self.person_df['frame_number']}
+    def setProcessedData(self, person_df:pd.DataFrame, bat_df=None):
+        self.person_df = person_df.copy()
+        self.person_data = self.person_df.to_dict('records')
+        self.bat_df = bat_df if bat_df is not None else pd.DataFrame()
+        self.processed_frames = set(self.person_df['frame_number'])
+        self.processed_targets = {frame_num: None for frame_num in self.processed_frames}
 
     def update_person_df(self, x:float, y:float,frame_num:int, correct_kpt_idx:int):
         self.person_df.loc[(self.person_df['frame_number'] == frame_num) &
@@ -630,6 +569,8 @@ class PoseEstimater:
         self.fps = None
         self.person_data = []
         self.processed_frames = set()
+        self.processed_targets = {}
+        self.tracked_frames = {}
         self.fps_timer = FPSTimer()
         self.smooth_filter = OneEuroFilter()
         self.is_detect = False
