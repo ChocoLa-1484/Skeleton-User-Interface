@@ -279,6 +279,19 @@
             </widget>
            </item>
            <item row="1" column="1">
+            <widget class="QPushButton" name="loadFolderBtn">
+             <property name="minimumSize">
+              <size>
+               <width>150</width>
+               <height>40</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>載入資料夾</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
             <widget class="QPushButton" name="startCodeBtn">
              <property name="minimumSize">
               <size>

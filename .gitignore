@@ -161,6 +161,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 Db
+tests
 Src/mmpose_main/work_dirs
 Src/mmpose_main/data
 .vscode/
@@ -176,3 +177,4 @@ Src/UI_Control/ui/baseball_*
 Src/UI_Control/ui/video_ui_v1.ui
 Src/UI_Control/ui/widget3d.py
 Src/UI_Control/ui/camera_ui.*
+

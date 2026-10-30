@@ -1,8 +1,6 @@
 import numpy as np
 import pandas as pd
 from utils.one_euro_filter import OneEuroFilter
-import os
-import sys
 import numpy as np
 from utils.model import Model
 from mmengine.logging import print_log
@@ -16,9 +14,6 @@ from ultralytics import YOLO
 import torch
 import torch.autograd.profiler as profiler
 import cv2
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(current_dir, "..", "tracker"))
 
 try:
     from mmdet.apis import inference_detector

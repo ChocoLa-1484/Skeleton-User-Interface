@@ -1,71 +1,74 @@
-# Skeleton-User-Interface requirements
-# Python 3.8 / CUDA 11.8 / torch 2.0.1+cu118
-# Run from the project root after installing PyTorch (README Step 2).
-# CSV export uses Python's built-in csv module; no extra package is needed.
+# Windows x64 / Python 3.8 / NVIDIA GPU
+# Follow README Step 1 first: install the pinned build tools and NumPy.
+# Install with: python -m pip install --no-build-isolation -r requirements.txt
+# Local mmpose/mmpretrain sources are installed separately in README Step 3.
 
-# Image processing
+# CUDA wheels: keep the exact PyTorch/CUDA combination used by MMCV.
+--extra-index-url https://download.pytorch.org/whl/cu118
+--find-links https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html
+--only-binary=mmcv,faiss-cpu,lapx
+
+torch==2.0.1+cu118
+torchvision==0.15.2+cu118
+torchaudio==2.0.2+cu118
+mmcv==2.0.0
+mmengine==0.10.7
+mmdet==3.1.0
+ultralytics==8.3.96
+
+# Image processing and numerical libraries
 numpy==1.24.4
 opencv-python==4.8.1.78
 Pillow==10.2.0
-scikit-image==0.21.0
 scipy==1.10.1
 matplotlib==3.7.5
-
-# Machine learning
+scikit-image==0.21.0
 scikit-learn==1.3.2
-timm==1.0.19
-thop==0.1.1.post2209072238
-einops
-
-# Data processing
 pandas==2.0.3
+
+# PyQt GUI
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.2
+pyqtgraph==0.13.3
+
+# Tracking / FastReID import dependencies
+# lapx provides the "lap" module. CPU Faiss is sufficient for main.py.
+lapx==0.5.11.post1
+faiss-cpu==1.8.0
+cython_bbox==0.1.5
+filterpy==1.4.5
+motmetrics==1.4.0
 h5py==3.11.0
 easydict==1.13
 prettytable==3.11.0
 tabulate==0.9.0
-tqdm==4.65.2
-
-# Config & serialization
-pyyaml==6.0.2
 yacs==0.1.8
-mat4py
-modelindex
-
-# Tracking
-filterpy==1.4.5
-motmetrics==1.4.0
-shapely==2.0.7
-lapx
-xtcocotools
-munkres
-json_tricks
-chumpy
-
-# Visualization
-PyQt5==5.15.11
-pyqtgraph==0.13.3
-tensorboard==2.14.0
-vispy
-
-# Model inference
-onnx==1.8.1
-onnxruntime==1.8.0
-onnx-simplifier==0.3.5
-
-# Utilities
-loguru==0.7.3
 termcolor==2.4.0
+tensorboard==2.14.0
 gdown==5.2.0
-ninja==1.13.0
 
-# YOLO
-ultralytics==8.3.96
+# Local MMPose / MMPretrain and MMDetection dependencies
+# Preinstall NumPy/Cython; cython_bbox and some COCO packages may need MSVC.
+einops==0.8.1
+importlib-metadata==8.5.0
+mat4py==0.6.0
+modelindex==0.0.2
+rich==13.4.2
+chumpy==0.70
+json_tricks==3.17.3
+munkres==1.1.4
+xtcocotools==1.14.3
+pycocotools==2.0.7
+shapely==2.0.7
+terminaltables==3.1.10
+timm==1.0.19
+thop==0.1.1.post2209072238
 
-# NOTE: install separately - NOT via this file
-# torch/torchvision/torchaudio : see README Step 2
-# mmcv/mmdet/mmengine           : via openmim, see README Step 5
-# mmpose                        : python setup.py develop --no-deps in Src/mmpose_main
-# mmpretrain                   : python setup.py develop --no-deps in Src/mmpretrain_main
-# faiss-gpu                    : conda install -c conda-forge faiss-gpu
-# cython_bbox                  : pip install cython_bbox
-# Optional FLIR camera support: EasyPySpin + vendor Spinnaker SDK (not needed for video files)
+# Common utilities
+pyyaml==6.0.2
+tqdm==4.65.2
+loguru==0.7.3
+
+# CSV export uses Python's built-in csv module.
+# ONNX export, VisPy, and FLIR EasyPySpin/Spinnaker are not needed by main.py.
+# Do not install mmcv-lite/mmcv-full alongside mmcv, or lap alongside lapx.

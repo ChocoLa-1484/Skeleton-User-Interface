@@ -3,6 +3,8 @@ import os
 import sys
 import tempfile
 import unittest
+import csv
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -14,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Src' / 'UI_Control
 
 import numpy as np
 import pandas as pd
+import cv2
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from cv_utils.cv_control import JsonLoader, VideoLoader
@@ -21,7 +24,10 @@ from skeleton.detect_skeleton import PoseEstimater
 from utils.selector import PersonSelector
 from utils.model import Model
 from tracker.mc_bot_sort import BoTSORT
+from tracker.basetrack import BaseTrack
 from video_widget import PoseVideoTabControl
+from cv_utils.batch_process import BatchAnalysisThread, BatchCancelled, folder_jobs
+from utils.paths import PROJECT_ROOT, PRETRAIN_ROOT, RECORD_ROOT
 
 
 def person(person_id=17, frame=0):
@@ -182,6 +188,143 @@ class VideoWorkflowTests(unittest.TestCase):
         self.assertIsNone(widget.pose_estimater.person_id)
         self.assertIsNone(widget.pose_estimater.processImage.call_args.kwargs['select_id'])
         widget.close()
+
+    def test_process_button_enables_both_overlays(self):
+        widget = PoseVideoTabControl(SimpleNamespace())
+        widget.video_loader.video_frames = [np.zeros((240, 320, 3), dtype=np.uint8)]
+        with patch.object(widget, 'analyzeFrame'), patch.object(widget.ui.playBtn, 'click'):
+            widget.toggleDetect()
+        self.assertTrue(widget.ui.showSkeletonCheckBox.isChecked())
+        self.assertTrue(widget.ui.showBboxCheckBox.isChecked())
+        self.assertTrue(widget.image_drawer.show_bbox)
+        self.assertTrue(widget.image_drawer.show_skeleton)
+        widget.close()
+
+    def test_default_paths_do_not_depend_on_working_directory(self):
+        original = Path.cwd()
+        with tempfile.TemporaryDirectory() as folder, patch.object(sys, 'argv', ['test']):
+            try:
+                os.chdir(folder)
+                yolo = Model.setDetectParserYolo(None)
+                pose = Model.setPoseParser(None)
+                tracker = Model.setTrackerParser(None)
+                loader = VideoLoader()
+            finally:
+                os.chdir(original)
+        self.assertEqual(Path(yolo.model), PRETRAIN_ROOT / 'yolo11m-seg.pt')
+        self.assertTrue(Path(pose.pose_config).is_file())
+        self.assertTrue(Path(pose.pose_config).is_absolute())
+        self.assertTrue(Path(tracker.fast_reid_config).is_absolute())
+        self.assertEqual(loader.output_root, RECORD_ROOT)
+        self.assertEqual(RECORD_ROOT, PROJECT_ROOT / 'Db' / 'Record')
+
+    def test_folder_discovery_ignores_subfolders_and_avoids_name_collisions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ['clip.mp4', 'clip.AVI', 'clip_mp4.mp4', 'other.MOV', 'notes.txt']:
+                (root / name).touch()
+            (root / 'nested').mkdir()
+            (root / 'nested' / 'hidden.mp4').touch()
+            jobs = folder_jobs(root)
+            self.assertEqual(len(jobs), 4)
+            self.assertEqual(len({name.casefold() for _, name in jobs}), 4)
+            self.assertEqual([path.name for path, _ in jobs], ['clip.AVI', 'clip.mp4', 'clip_mp4.mp4', 'other.MOV'])
+
+    @staticmethod
+    def write_clip(path):
+        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*'mp4v'), 24, (320, 240))
+        if not writer.isOpened():
+            raise RuntimeError('Test video codec unavailable')
+        try:
+            for _ in range(3):
+                writer.write(np.zeros((240, 320, 3), dtype=np.uint8))
+        finally:
+            writer.release()
+
+    @staticmethod
+    def batch_model():
+        model = SimpleNamespace(tracker=object(), image_size=(10, 10))
+        def set_size(size):
+            model.tracker = object()
+            model.image_size = size
+            BaseTrack.clear_count()
+        model.setImageSize = set_size
+        return model
+
+    @staticmethod
+    def batch_estimator(model):
+        estimator = PoseEstimater(model)
+        def detect(frame, frame_num, **kwargs):
+            estimator.person_df = pd.concat([
+                estimator.person_df, pd.DataFrame([person(17, frame_num)])
+            ], ignore_index=True)
+        estimator.detectKpt = detect
+        return estimator
+
+    def test_batch_writes_all_outputs_and_continues_after_bad_video(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            inputs = root / 'inputs'
+            inputs.mkdir()
+            self.write_clip(inputs / 'one.mp4')
+            self.write_clip(inputs / 'two.mp4')
+            (inputs / 'bad.mp4').write_bytes(b'not a video')
+            model = self.batch_model()
+            original_tracker = model.tracker
+            original_track_count = BaseTrack.next_id()
+            worker = BatchAnalysisThread(model, folder_jobs(inputs), root / 'outputs')
+            with patch('cv_utils.batch_process.PoseEstimater', side_effect=self.batch_estimator):
+                worker.run()
+            self.assertEqual(len(worker.result['completed']), 2)
+            self.assertEqual(len(worker.result['errors']), 1)
+            self.assertIs(model.tracker, original_tracker)
+            self.assertEqual(BaseTrack._count, original_track_count)
+            self.assertEqual(model.image_size, (10, 10))
+            for name in ['one', 'two']:
+                output = root / 'outputs' / name
+                data = json.loads((output / f'{name}.json').read_text())
+                self.assertEqual([row['frame_number'] for row in data], [0, 1, 2])
+                with (output / f'{name}.csv').open(encoding='utf-8-sig', newline='') as stream:
+                    self.assertEqual(len(list(csv.DictReader(stream))), 78)
+                for suffix in ['', '_Sk26']:
+                    capture = cv2.VideoCapture(str(output / f'{name}{suffix}.mp4'))
+                    try:
+                        self.assertEqual(int(capture.get(cv2.CAP_PROP_FRAME_COUNT)), 3)
+                        self.assertAlmostEqual(capture.get(cv2.CAP_PROP_FPS), 24, places=1)
+                        ok, frame = capture.read()
+                        self.assertTrue(ok)
+                        if suffix:
+                            self.assertGreater(int(frame.sum()), 0)
+                    finally:
+                        capture.release()
+            self.assertEqual(list((root / 'outputs').glob('.batch-*')), [])
+
+    def test_batch_cancel_preserves_completed_results_and_old_outputs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.write_clip(root / 'one.mp4')
+            self.write_clip(root / 'two.mp4')
+            outputs = root / 'outputs'
+            (outputs / 'two').mkdir(parents=True)
+            old = outputs / 'two' / 'two.json'
+            old.write_text('old result')
+            model = self.batch_model()
+            original_tracker = model.tracker
+            worker = BatchAnalysisThread(model, [(root / 'one.mp4', 'one'), (root / 'two.mp4', 'two')], outputs)
+            def estimator_for_video(model):
+                estimator = self.batch_estimator(model)
+                if worker.result['completed']:
+                    estimator.detectKpt = Mock(side_effect=BatchCancelled())
+                return estimator
+            with patch('cv_utils.batch_process.PoseEstimater', side_effect=estimator_for_video):
+                worker.run()
+            self.assertTrue(worker.result['cancelled'])
+            self.assertEqual(len(worker.result['completed']), 1)
+            self.assertFalse(worker.result['errors'])
+            self.assertEqual(old.read_text(), 'old result')
+            self.assertTrue((outputs / 'one' / 'one_Sk26.mp4').is_file())
+            self.assertEqual(list(outputs.glob('.batch-*')), [])
+            self.assertIs(model.tracker, original_tracker)
 
 
 if __name__ == '__main__':

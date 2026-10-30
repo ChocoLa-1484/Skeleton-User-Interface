@@ -12,6 +12,8 @@ from utils.selector import PersonSelector
 from cv_utils.cv_control import VideoLoader, JsonLoader
 from skeleton.detect_skeleton import PoseEstimater
 from utils.model import Model
+from utils.paths import PROJECT_ROOT
+from cv_utils.batch_process import BatchAnalysisThread, folder_jobs
 
 class PoseVideoTabControl(QWidget):
     def __init__(self, model:Model, parent = None):
@@ -28,6 +30,7 @@ class PoseVideoTabControl(QWidget):
             lambda: self.loadVideo(is_processed=False))
         self.ui.loadProcessedVideoBtn.clicked.connect(
             lambda: self.loadVideo(is_processed=True))
+        self.ui.loadFolderBtn.clicked.connect(self.loadFolder)
 
         self.ui.playBtn.clicked.connect(self.play_btn_clicked)
         self.ui.backKeyBtn.clicked.connect(
@@ -70,6 +73,8 @@ class PoseVideoTabControl(QWidget):
         self.updateFrame(self.ui.frameSlider.value())
 
     def keyPressEvent(self, event):
+        if self.batch_worker is not None:
+            return
         if event.key() == ord('D') or event.key() == ord('d'):
             self.ui.frameSlider.setValue(self.ui.frameSlider.value() + 1)
         elif event.key() == ord('A') or event.key() == ord('a'):
@@ -92,6 +97,9 @@ class PoseVideoTabControl(QWidget):
         self.correct_kpt_idx = 0
         self.label_kpt = False
         self.is_processed = False
+        self.batch_worker = None
+        self.batch_progress = None
+        self.closing_after_batch = False
 
     def reset(self):
         self.is_processing = False
@@ -105,12 +113,78 @@ class PoseVideoTabControl(QWidget):
             checkbox.blockSignals(blocked)
 
     def loadVideo(self, is_processed:bool = False):
+        if self.batch_worker is not None:
+            return
         if self.is_play:
             self.ui.playBtn.click()
         if not self.video_loader.loadVideo():
             return
         self.is_processed = is_processed
         self.checkVideoLoad()
+
+    def loadFolder(self):
+        if self.batch_worker is not None:
+            return
+        if self.video_loader.is_loading:
+            QMessageBox.information(self, "影片讀取中", "請等待目前影片讀取完成。")
+            return
+        folder = QFileDialog.getExistingDirectory(self, "選擇要批次分析的影片資料夾", str(PROJECT_ROOT))
+        if not folder:
+            return
+        try:
+            jobs = folder_jobs(folder)
+        except OSError as error:
+            QMessageBox.warning(self, "無法讀取資料夾", str(error))
+            return
+        if not jobs:
+            QMessageBox.information(self, "沒有影片", "資料夾第一層沒有支援的影片。")
+            return
+        if self.is_play:
+            self.play_btn_clicked()
+        self.is_processing = False
+        self.setBatchControlsEnabled(False)
+        self.batch_progress = QProgressDialog("準備批次分析…", "取消", 0, len(jobs) * 100, self)
+        self.batch_progress.setWindowTitle("ViTPose 資料夾分析")
+        self.batch_progress.setWindowModality(Qt.WindowModal)
+        self.batch_progress.setAutoClose(False)
+        self.batch_progress.setAutoReset(False)
+        self.batch_progress.setMinimumDuration(0)
+        self.batch_worker = BatchAnalysisThread(self.model, jobs, parent=self)
+        self.batch_worker.progress.connect(self.updateBatchProgress)
+        self.batch_worker.finished.connect(self.finishBatch)
+        self.batch_progress.canceled.connect(self.batch_worker.requestInterruption)
+        self.batch_progress.show()
+        self.batch_worker.start()
+
+    def setBatchControlsEnabled(self, enabled):
+        for control in (self.ui.FileGroupbox, self.ui.DisplayGroupBox, self.ui.FrameView,
+                        self.ui.frameSlider, self.ui.playBtn, self.ui.backKeyBtn, self.ui.forwardKeyBtn):
+            control.setEnabled(enabled)
+
+    def updateBatchProgress(self, index, total, filename, frame, frame_count):
+        detail = f"影格 {frame}/{frame_count}" if frame_count else "讀取影片中"
+        self.batch_progress.setLabelText(f"{index}/{total}：{filename}\n{detail}")
+        percent = min(100, int(frame * 100 / frame_count)) if frame_count else 0
+        self.batch_progress.setValue((index - 1) * 100 + percent)
+
+    def finishBatch(self):
+        result = self.batch_worker.result
+        self.batch_progress.close()
+        self.batch_progress.deleteLater()
+        self.setBatchControlsEnabled(True)
+        self.batch_worker.deleteLater()
+        self.batch_worker = None
+        if self.closing_after_batch:
+            return
+        message = f"完成 {len(result['completed'])} 支，失敗 {len(result['errors'])} 支。"
+        if result['cancelled']:
+            message += "\n已取消剩餘影片，已完成的輸出會保留。"
+        if result['errors']:
+            dialog = QMessageBox(QMessageBox.Warning, "批次分析結果", message, QMessageBox.Ok, self)
+            dialog.setDetailedText('\n'.join(f'{path}: {error}' for path, error in result['errors']))
+            dialog.exec_()
+        else:
+            QMessageBox.information(self, "批次分析結果", message)
 
     def checkVideoLoad(self):
         if not self.video_loader.video_name:
@@ -187,6 +261,8 @@ class PoseVideoTabControl(QWidget):
             self.playFrame(self.ui.frameSlider.value())
 
     def analyzeFrame(self):
+        if self.batch_worker is not None:
+            return
         if self.video_loader.is_loading or not self.video_loader.video_frames:
             return
         frame_num = self.ui.frameSlider.value()
@@ -198,8 +274,13 @@ class PoseVideoTabControl(QWidget):
         self.ui.FPSInfoLabel.setText(str(fps) if not self.is_processed else "—")
         if self.is_processing and not self.is_processed and frame_num == self.video_loader.total_frames - 1:
             self.is_processing = False
-            self.video_loader.saveVideo(False)
-            self.video_loader.saveVideo(True)
+            try:
+                self.video_loader.saveVideo(False)
+                self.video_loader.saveVideo(True)
+            except (OSError, ValueError) as error:
+                self.is_play = False
+                self.ui.playBtn.setText("▶︎")
+                QMessageBox.warning(self, "儲存失敗", str(error))
         self.updateFrame(frame_num)
 
     def updateFrame(self, frame_num:int):
@@ -223,6 +304,7 @@ class PoseVideoTabControl(QWidget):
             QMessageBox.information(self, "已載入骨架資料", "目前使用已儲存的骨架。若要重新偵測與儲存，請以「載入原始影片」開啟影片。")
             return
         self.ui.showSkeletonCheckBox.setChecked(True)
+        self.ui.showBboxCheckBox.setChecked(True)
         self.pose_estimater.setDetect(True)
         self.is_processing = True
         if self.ui.frameSlider.value() == 0:

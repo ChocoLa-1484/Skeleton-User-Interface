@@ -5,6 +5,8 @@ import queue
 import os
 import pandas as pd
 from enum import Enum
+from pathlib import Path
+from utils.paths import RECORD_ROOT
 from PyQt5.QtWidgets import QGraphicsScene
 from utils.vis_image import ImageDrawer
 from cv_utils.cv_thread import VideoCaptureThread, VideoWriterThread, VideoToImagesThread
@@ -106,8 +108,9 @@ class DataType(Enum):
     FOLDER = {"name": "folder", "tips": "", "filter": ""}
 
 class VideoLoader:
-    def __init__(self, image_drawer: ImageDrawer =None):
+    def __init__(self, image_drawer: ImageDrawer =None, output_root=None):
         self.image_drawer = image_drawer
+        self.output_root = Path(output_root) if output_root is not None else RECORD_ROOT
         self.video_path = None
         self.folder_path = None
         self.video_size = None
@@ -153,14 +156,8 @@ class VideoLoader:
     
     def saveVideo(self, process:bool):
         self.ensureVideoProcessed()
-        output_folder = os.path.join("../../Db/Record", self.video_name)
-        os.makedirs(output_folder, exist_ok=True)
-
-        json_path = os.path.join(output_folder, f"{self.video_name}.json")
-
-        save_person_df = self.image_drawer.pose_estimater.person_df
-        save_person_df.to_json(json_path, orient='records')
-        self.saveSkeletonCsv(os.path.join(output_folder, f"{self.video_name}.csv"))
+        output_folder = self.output_root / self.video_name
+        self.saveSkeletonData(output_folder)
 
         if process:
             save_location = os.path.join(output_folder, f"{self.video_name}_Sk26.mp4")
@@ -168,21 +165,27 @@ class VideoLoader:
         video_writer = cv2.VideoWriter(save_location, cv2.VideoWriter_fourcc(*'mp4v'), self.video_fps, self.video_size)
 
         if not video_writer.isOpened():
-            print("Error while opening video writer!")
-            return
-        if process:
+            raise OSError(f"無法寫入影片：{save_location}")
+        try:
             for frame_num, frame in enumerate(self.video_frames):
                 image = self.image_drawer.drawInfo(
                     img=frame, frame_num=frame_num,
                     show_bbox=True, show_skeleton=True, is_select=False
-                )
+                ) if process else frame
                 video_writer.write(image)
-        else:
-            for frame_num, frame in enumerate(self.video_frames):
-                # image = self.image_drawer.drawInfo(img = frame, frame_num = frame_num)
-                video_writer.write(frame)
-        video_writer.release()
+        finally:
+            video_writer.release()
         print("Store video success")
+
+    def saveSkeletonData(self, output_folder=None):
+        output_folder = Path(output_folder) if output_folder is not None else self.output_root / self.video_name
+        os.makedirs(output_folder, exist_ok=True)
+
+        json_path = os.path.join(output_folder, f"{self.video_name}.json")
+
+        save_person_df = self.image_drawer.pose_estimater.person_df
+        save_person_df.to_json(json_path, orient='records')
+        self.saveSkeletonCsv(os.path.join(output_folder, f"{self.video_name}.csv"))
 
     def ensureVideoProcessed(self):
         pose_estimater = self.image_drawer.pose_estimater

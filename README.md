@@ -20,141 +20,80 @@
 
 ## 環境需求
 
-| 項目 | 版本 |
-|------|------|
-| OS | Windows 10 / 11 |
-| Python | 3.8 |
-| CUDA | 11.8 |
-| cuDNN | 對應 CUDA 11.8 |
-| Anaconda | 任意版本 |
+以下流程針對 **Windows 10／11 x64、Python 3.8、NVIDIA GPU**。請依序執行，不要直接套用最新版 PyTorch 或 OpenMMLab 套件。
 
-> GPU 為必要條件，CPU-only 模式未支援。
+| 項目 | 固定組合／需求 |
+|------|------|
+| Python | 3.8.20（64 位元，Conda 環境） |
+| PyTorch / torchvision / torchaudio | 2.0.1+cu118 / 0.15.2+cu118 / 2.0.2+cu118 |
+| MMCV / MMEngine / MMDetection | 2.0.0 / 0.10.7 / 3.1.0 |
+| MMPose / MMPretrain | 本專案原始碼，1.3.1 / 1.2.0 |
+| NumPy / PyQt5 | 1.24.4 / 5.15.11 |
+| NVIDIA GPU 與驅動 | 須支援上述 CUDA 11.8 套件；安裝後必須確認 `torch.cuda.is_available()` 為 `True` |
+| C++ 編譯工具 | Visual Studio Build Tools 的「使用 C++ 的桌面開發」，含 MSVC x64/x86 工具與 Windows SDK，供 `cython_bbox` 等原始碼套件編譯 |
+
+本流程使用預編譯的 PyTorch／MMCV CUDA wheel，不需另外手動複製 cuDNN 或編譯 MMCV。程式目前不支援 CPU-only 推論。`faiss-cpu` 是追蹤模組的相依套件，不會把 YOLO／ViTPose 推論改成 CPU。
+
+下載來源：[PyTorch 官方歷史版本](https://docs.pytorch.org/get-started/previous-versions/)、[MMCV 官方 CUDA 11.8／Torch 2.0 wheel 清單](https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html)、[Faiss CPU wheel](https://pypi.org/project/faiss-cpu/1.8.0/)。
 
 ---
 
 ## 安裝步驟
 
-> **注意**：所有指令請在 **Anaconda Prompt** 或已初始化 conda 的 PowerShell 中執行。
-> PowerShell 需先執行 `conda init powershell` 並重新開啟視窗，才能使用 `conda activate`。
+以下指令使用 **PowerShell**。先安裝 Conda 與上述 C++ 編譯工具；若尚未初始化 PowerShell，執行 `conda init powershell` 後重新開啟視窗。
 
----
+### Step 1 — 建立環境與安裝編譯前置套件
 
-### Step 1 — 建立 Conda 環境
+請將專案路徑換成實際位置。若已有名為 `Skeleton` 的環境且想重建，請使用不同環境名稱，避免混入舊套件。
 
-```bash
-conda create -n Skeleton python=3.8 -y
+```powershell
+cd C:/Workspace/Skeleton-User-Interface
+conda create -n Skeleton python=3.8.20 -y
 conda activate Skeleton
+python -m pip install pip==24.2 setuptools==60.2.0 wheel==0.44.0
+python -m pip install numpy==1.24.4 Cython==0.29.37
 ```
 
----
+先安裝 NumPy／Cython，是因為部分套件在建置階段就需要它們。固定 pip／setuptools，則是為了配合本專案的舊版 `setup.py` 與 editable 安裝流程。
 
-### Step 2 — 安裝 PyTorch（CUDA 11.8）
+### Step 2 — 安裝執行主程式所需的相依套件
 
-```bash
-pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
-```
-
----
-
-### Step 3 — 安裝基本套件
-
-在專案根目錄執行，包含 PyQt5 GUI 所需套件。CSV 匯出使用 Python 內建的 `csv` 模組，不需額外安裝套件。
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-### Step 4 — 驗證 PyQt5
-
-PyQt5 已包含在 `requirements.txt`，完成 Step 3 後可確認安裝版本：
-
-```bash
-python -c "from PyQt5.QtCore import PYQT_VERSION_STR; print(PYQT_VERSION_STR)"
-# 應輸出: 5.15.11
-```
-
----
-
-### Step 5 — 安裝 OpenMMLab 套件
-
-```bash
-pip install -U openmim
-mim install "mmcv==2.0.0"
-mim install "mmdet==3.1.0"
-mim install mmengine
-```
-
----
-
-### Step 6 — 安裝 mmpose（從本專案原始碼）
-
-Windows 上 `.mim` 資料夾有權限問題，**必須先刪除再安裝**：
+在專案根目錄執行：
 
 ```powershell
-# 回到專案根目錄（若不在根目錄請先 cd 過去）
-cd C:\Workspace\Skeleton-User-Interface
-
-# 刪除 .mim 資料夾（若不存在會顯示錯誤可忽略）
-Remove-Item -Recurse -Force Src\mmpose_main\mmpose\.mim
-
-# 安裝
-cd Src\mmpose_main
-python setup.py develop --no-deps
-cd ..\..
+python -m pip install --no-build-isolation -r requirements.txt
 ```
 
----
+`requirements.txt` 已包含 PyTorch CUDA、MMCV、MMEngine、MMDetection、PyQt5、Faiss CPU 與骨架／追蹤相依套件，不需再使用 `mim install` 或 `conda install faiss-gpu`。初次安裝會下載大型 PyTorch wheel，請等待指令成功完成後再進行下一步。
 
-### Step 7 — 安裝 mmpretrain（從本專案原始碼）
+- MMCV 固定使用官方 `cu118/torch2.0.0` wheel，並禁止退回原始碼編譯；不要同時安裝 `mmcv-lite` 或舊版 `mmcv-full`。
+- `lapx` 提供程式使用的 `lap` 模組，不需另外安裝 `lap`。
+- CSV 使用 Python 內建模組。ONNX 匯出工具、VisPy、FLIR SDK 不屬於目前 `main.py` 的必要安裝項目。
+- 不要額外安裝 `opencv-python-headless` 或其他 OpenCV 發行套件來覆蓋 GUI 使用的 `opencv-python`。
 
-ViTPose 的 Vision Transformer backbone 需要此套件，同樣需先刪除 `.mim`：
+### Step 3 — 安裝本專案的 MMPose 與 MMPretrain
+
+仍在專案根目錄執行：
 
 ```powershell
-# 回到專案根目錄
-cd C:\Workspace\Skeleton-User-Interface
-
-# 刪除 .mim 資料夾（若不存在會顯示錯誤可忽略）
-Remove-Item -Recurse -Force Src\mmpretrain_main\mmpretrain\.mim
-
-# 安裝
-cd Src\mmpretrain_main
-python setup.py develop --no-deps
-cd ..\..
+python -m pip install --no-deps --no-build-isolation -e ./Src/mmpose_main -e ./Src/mmpretrain_main
 ```
 
----
+必須使用專案內的原始碼，其中包含 HALPE／ViTPose 設定。`--no-deps` 是因為相依套件已由 Step 2 固定安裝；不要省略前一步。全新 checkout 通常不需手動刪除 `.mim`；若重複安裝遇到該目錄的權限錯誤，請參考常見問題。
 
-### Step 8 — 安裝 faiss 與 cython_bbox
+### Step 4 — 驗證套件與 CUDA 算子
 
-```bash
-conda install -c conda-forge faiss-gpu -y
-pip install cython_bbox
+```powershell
+python -m pip check
+python -c "import sys, torch; print(sys.executable); print(torch.__version__, torch.cuda.is_available()); assert torch.cuda.is_available(), 'CUDA unavailable'"
+python -c "import mmcv, mmengine, mmdet, mmpose, mmpretrain; print(mmcv.__version__, mmengine.__version__, mmdet.__version__, mmpose.__version__, mmpretrain.__version__)"
+python -c "import torch; from mmcv.ops import nms; boxes=torch.tensor([[0.,0.,10.,10.]],device='cuda'); scores=torch.ones(1,device='cuda'); print(nms(boxes,scores,0.5)); print('MMCV CUDA OK')"
+python -c "import faiss, lap; from cython_bbox import bbox_overlaps; from PyQt5.QtCore import PYQT_VERSION_STR; print('Tracking imports OK; PyQt', PYQT_VERSION_STR)"
 ```
 
----
+預期版本為 `2.0.1+cu118 True`、`2.0.0 0.10.7 3.1.0 1.3.1 1.2.0`、PyQt `5.15.11`，且 `pip check` 顯示 `No broken requirements found`。若任何一步失敗，先修正環境再啟動 GUI。
 
-### Step 9 — 驗證安裝
-
-執行以下指令，確認所有關鍵套件正常：
-
-```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-# 應輸出: 2.0.1+cu118 True
-
-python -c "import mmpose; print(mmpose.__version__)"
-# 應輸出: 1.3.1
-
-python -c "import mmpretrain; print(mmpretrain.__version__)"
-# 應輸出: 1.2.0
-
-python -c "from ultralytics import YOLO; print('YOLO OK')"
-# 應輸出: YOLO OK
-```
-
-> **libiomp5md.dll 衝突**：若出現 OpenMP 相關警告，請刪除：
-> `C:\Users\<你的帳號>\anaconda3\envs\Skeleton\Library\bin\libiomp5md.dll`
+驗證紀錄（2026-10-29）：在本機 Windows 的全新 Python 3.8.20 venv 中，不繼承既有環境套件，依上述 pip 安裝順序完成建置。已通過相依性檢查、MMCV CUDA NMS、專案根目錄啟動的模型與主視窗初始化、Qt 事件迴圈，以及 16 項回歸測試；另以實際模型完成兩支短片的資料夾批次分析。主視窗驗證採用下方的無視窗模式。其他電腦仍需備妥相容 GPU／驅動、C++ 編譯工具與模型權重。
 
 ---
 
@@ -185,11 +124,25 @@ Skeleton-User-Interface/
 
 ## 啟動程式
 
-```bash
+先完成上方模型準備，再使用同一個 Conda 環境啟動：
+
+```powershell
 conda activate Skeleton
-cd Src\UI_Control
-python main.py
+cd C:/Workspace/Skeleton-User-Interface
+python Src/UI_Control/main.py
 ```
+
+模型、設定檔、字型與輸出位置依程式檔案位置解析，不需切換到 `Src/UI_Control`。從其他工作目錄也可用 `main.py` 的絕對路徑啟動；輸出固定放在此專案的 `Db/Record`。在 IDE 中選用已安裝相依套件的 Python 解譯器即可，程式不再依賴 `CONDA_PREFIX` 設定 Qt 路徑。
+
+如需自動檢查主視窗、模型權重與 Qt 事件迴圈是否能初始化，可在相同目錄執行以下指令；它不顯示視窗，約一秒後結束事件迴圈（模型載入另需時間）：
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+python -c "import sys; sys.path.insert(0,'Src/UI_Control'); from PyQt5.QtWidgets import QApplication; from PyQt5.QtCore import QTimer; from main import Main; app=QApplication([]); window=Main(); QTimer.singleShot(1000, app.quit); app.exec_(); print('main.py startup OK')"
+Remove-Item Env:QT_QPA_PLATFORM
+```
+
+回歸測試可從專案根目錄執行 `python -m unittest discover -s tests -v`。測試使用臨時資料，不覆寫 `Db/Record`。
 
 ---
 
@@ -204,7 +157,7 @@ python main.py
 │                                     │  │  檔案            │    │
 │         影片顯示區                   │  │  檔名: xxx       │    │
 │         (FrameView)                 │  │  FPS: 280        │    │
-│                                     │  │ [載入原始影片]    │    │
+│                                     │  │ [載入原始影片] [載入資料夾] │
 │                                     │  │ [處理和儲存]      │    │
 │                                     │  │ [載入處理過的影片] │    │
 │                                     │  └──────────────────┘    │
@@ -227,7 +180,8 @@ python main.py
 | 按鈕 | 功能 |
 |------|------|
 | **載入原始影片** | 開啟檔案選擇對話框，載入未處理的 MP4 影片。影片載入後會自動逐幀解析並顯示第 0 幀。 |
-| **處理和儲存** | 從第 0 幀開始處理，抵達最後一幀後補做尚未處理的影格，再將原畫面影片、人物框＋骨架影片（`_Sk26.mp4`）、JSON 與 CSV 儲存至 `Db/Record/{影片名稱}/`。 |
+| **載入資料夾** | 選擇資料夾後，依檔名順序自動分析第一層所有支援的影片，顯示進度並支援取消。 |
+| **處理和儲存** | 同時勾選「人體骨架」與「人物框」，從第 0 幀開始處理；抵達最後一幀後補做尚未處理的影格，再將原畫面影片、人物框＋骨架影片（`_Sk26.mp4`）、JSON 與 CSV 儲存至 `Db/Record/{影片名稱}/`。 |
 | **載入處理過的影片** | 載入影片及對應的骨架 JSON，直接顯示人物框與骨架，不重新執行模型；支援原畫面影片與 `_Sk26.mp4`。 |
 
 #### 播放控制區
@@ -265,6 +219,8 @@ python main.py
 
 點擊「**處理和儲存**」→ 程式會自動從第 0 幀開始播放並逐幀進行骨架偵測。
 
+「人體骨架」與「人物框」會一併勾選，因此預覽會同時顯示兩者。
+
 > 偵測速度取決於 GPU 效能、人物數與影片解析度。FPS 顯示骨架處理計時結果，已處理影片顯示「—」；不代表原影片幀率或完整輸出速度。
 
 **③ 選取追蹤目標（選擇人）**
@@ -291,6 +247,18 @@ python main.py
 載入後會直接顯示儲存結果，缺少人物的影格也不會重新偵測。若 JSON 不存在或缺少必要欄位，程式會顯示錯誤訊息。此模式的「選擇人」只篩選 JSON 中已有的人物；若要重新估計或分析未儲存的人物，請以「**載入原始影片**」開啟未繪製標記的影片。CSV 目前僅供匯出分析，不作為重新載入來源。
 
 ---
+
+### 資料夾批次分析
+
+點擊「載入原始影片」旁的「**載入資料夾**」，選擇資料夾後就會開始逐支分析，不需另外按「處理和儲存」。
+
+- 分析資料夾第一層的 `.mp4`、`.avi`、`.mov`、`.mkv`、`.webm`、`.m4v`、`.mpg`、`.mpeg`、`.wmv`，副檔名不區分大小寫；不包含子資料夾。
+- 每支影片使用獨立的追蹤與骨架資料，對所有有效追蹤人物做 ViTPose 分析，不沿用單片預覽的選人設定。
+- 每支影片輸出至 `Db/Record/{影片名稱}/`，包含原畫面 MP4、人物框＋骨架 MP4、JSON 與 CSV。輸入檔若同名但副檔名不同，會在輸出名稱加上副檔名及必要的流水號，避免互相覆寫。
+- 批次期間會顯示影片與影格進度；預覽操作暫時停用，按「取消」可停止剩餘處理。已完成的影片會保留，當前尚未完成的暫存結果會清除。
+- 單支影片失敗後會繼續下一支，結束時顯示成功／失敗數及錯誤詳細資料。影片完整完成後才更新同名輸出檔。
+
+批次逐幀讀取與寫入影片，保留來源 FPS，不會一次把整個資料夾的影像載入記憶體。完成後會恢復原先單片預覽的追蹤狀態。
 
 ### 骨架關節點對照（HALPE 26 點）
 
@@ -387,48 +355,42 @@ Skeleton-User-Interface/
 
 ## 常見問題
 
-**Q：程式啟動時出現 `ModuleNotFoundError: No module named 'mmpose'`**
+**Q：找不到 `mmpose`、`mmpretrain` 或 `VisionTransformer`**
 
-A：mmpose 需從本專案原始碼安裝。執行：
-```bash
-conda activate Skeleton
-cd Src\mmpose_main
-python setup.py develop --no-deps
-```
-若出現 `PermissionError [WinError 5]`，先刪除 `Src\mmpose_main\mmpose\.mim` 資料夾。
+A：確認使用正確的 Python 環境，並在專案根目錄重跑 Step 3 的兩個本地套件安裝。`utils/model.py` 會匯入 `mmpretrain` 來註冊 ViTPose backbone；僅安裝 PyPI 的 MMPose 不足以取代本專案原始碼。
 
----
+**Q：找不到 `ultralytics`、`faiss`、`lap` 或 `cython_bbox`**
 
-**Q：程式啟動時出現 `ModuleNotFoundError: No module named 'ultralytics'`**
+A：在啟用的 `Skeleton` 環境中，從專案根目錄重新執行 Step 2，並確認安裝成功。`faiss` 對應的套件名稱為 `faiss-cpu`，`lap` 對應 `lapx`。不要在另外一個 Python 環境單獨補裝。
 
-A：執行：
-```bash
-conda activate Skeleton
-pip install ultralytics==8.3.96
-```
+**Q：`cython_bbox`／COCO 套件編譯失敗，或要求 Microsoft Visual C++**
 
----
+A：安裝 Visual Studio Build Tools 的「使用 C++ 的桌面開發」（含 MSVC 與 Windows SDK），重開終端機，再依序執行 Step 1 的前置套件安裝與 Step 2。若仍找不到編譯器，可從 Visual Studio 的 x64 Native Tools 終端機啟用 Conda 後安裝。請保留 `--no-build-isolation`，讓建置使用環境中已固定的 NumPy／Cython。
 
-**Q：出現 `EasyPySpin` 相關錯誤**
+**Q：找不到相符的 MMCV wheel，或出現 `No module named mmcv._ext`**
 
-A：`EasyPySpin` 是 FLIR 工業相機的 SDK，非必要套件，已透過 `try/except` 處理。若仍出錯，代表程式碼有未預期的路徑直接使用它，請回報 issue。
+A：確認 Python 是 Windows x64 的 3.8、PyTorch 是 `2.0.1+cu118`，以及能連線到 requirements 中的官方下載來源。不要把 `mmcv-lite` 當成替代品。若環境已混裝多種 MMCV，建議建立新環境後依文件安裝，再執行 Step 4 的 CUDA NMS 檢查。
 
----
+**Q：本地套件安裝時，`.mim` 出現 `PermissionError [WinError 5]`**
+
+A：先關閉使用此環境的程式，確認目前位於專案根目錄。只清理對應套件產生的 `.mim` 目錄後重跑 Step 3；不要刪除來源 `configs`、`tools` 或整個套件目錄。全新安裝不需預先清理。
+
+**Q：找不到模型權重**
+
+A：確認兩份模型權重位於此專案的 `Db/pretrain`，檔名與模型準備章節一致。從專案根目錄執行 `python Src/UI_Control/main.py`，或使用程式的絕對路徑；不需手動設定 `CONDA_PREFIX`。
+
+**Q：出現 Qt platform plugin／`qwindows.dll` 錯誤**
+
+A：確認使用 `Skeleton` 的 Python，並完成 PyQt5 安裝。移除終端機中手動指定、指向其他 Python／Qt 安裝的 `QT_PLUGIN_PATH`，不要混用其他環境的 Qt DLL。自動啟動檢查結束後，需清除 `QT_QPA_PLATFORM=offscreen` 才會顯示正常視窗。
 
 **Q：出現 `libiomp5md.dll` 衝突警告**
 
-A：刪除 `C:\Users\<帳號>\anaconda3\envs\Skeleton\Library\bin\libiomp5md.dll` 即可解決。
+A：通常是同一個程序載入多份 OpenMP runtime。請在新環境使用本文件的 pip 套件組合，避免混裝 Conda 的 Faiss GPU／數值套件與 pip 版本；也要檢查 PATH 是否指向其他環境。不要直接刪除不明 DLL，或以 `KMP_DUPLICATE_LIB_OK` 略過衝突。
 
----
+**Q：出現 `EasyPySpin` 相關錯誤**
 
-**Q：影片偵測速度很慢**
+A：目前影片分析不需要 FLIR 相機 SDK，未安裝 `EasyPySpin` 時程式會略過其匯入。若另行開發 FLIR 擷取功能，才需安裝匹配的 Spinnaker SDK 與 Python 套件。
 
-A：確認 `torch.cuda.is_available()` 回傳 `True`。若為 `False`，代表 PyTorch 使用 CPU 模式，需重新安裝 CUDA 版本的 PyTorch（見 Step 2）。
+**Q：CUDA 不可用或影片偵測很慢**
 
----
-
-**Q：到另一台電腦安裝時，mmpose setup.py 失敗**
-
-A：常見原因是 `.mim` 資料夾的 Windows 權限問題。步驟：
-1. 手動刪除 `Src\mmpose_main\mmpose\.mim`
-2. 再次執行 `python setup.py develop --no-deps`
+A：先執行 `nvidia-smi` 與 Step 4 的 CUDA 檢查。若 `torch.cuda.is_available()` 為 `False`，確認 GPU 驅動、硬體相容性，以及是否誤裝 CPU 版 PyTorch。安裝 CUDA Toolkit 本身不會把 CPU 版 PyTorch 變成 CUDA 版。

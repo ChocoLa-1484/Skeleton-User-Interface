@@ -1,6 +1,4 @@
 import sys
-import os
-os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.path.join(os.environ["CONDA_PREFIX"], "Library", "plugins", "platforms")
 from PyQt5.QtWidgets import QApplication, QMainWindow
 from video_widget import PoseVideoTabControl
 from ui.main_window import Ui_MainWindow
@@ -18,6 +16,17 @@ class Main(QMainWindow):
     def init_tabs(self):
         self.video_tab = PoseVideoTabControl(self.model)
         self.ui.Two_d_Tab.addTab(self.video_tab, "2D 影片")
+
+    def closeEvent(self, event):
+        worker = self.video_tab.batch_worker
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            if not self.video_tab.closing_after_batch:
+                self.video_tab.closing_after_batch = True
+                worker.finished.connect(self.close)
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 if __name__ == '__main__':
