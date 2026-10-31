@@ -170,7 +170,7 @@ class VideoLoader:
             for frame_num, frame in enumerate(self.video_frames):
                 image = self.image_drawer.drawInfo(
                     img=frame, frame_num=frame_num,
-                    show_bbox=True, show_skeleton=True, is_select=False
+                    show_bbox=False, show_skeleton=True, is_select=False
                 ) if process else frame
                 video_writer.write(image)
         finally:

@@ -108,7 +108,7 @@ class BatchAnalysisThread(QThread):
                 while ok:
                     self.check_cancelled()
                     estimator.detectKpt(frame, frame_num, is_video=True)
-                    annotated = drawer.drawInfo(frame, frame_num, show_bbox=True,
+                    annotated = drawer.drawInfo(frame, frame_num, show_bbox=False,
                                                 show_skeleton=True, is_select=False)
                     writers[0].write(frame)
                     writers[1].write(annotated)
