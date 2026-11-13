@@ -1,5 +1,7 @@
 # Skeleton-User-Interface
 
+整合環境：`conda activate Skeleton` 後執行 `python Src/UI_Control/main.py`。保留 Python 3.8.20／PyTorch 2.0.1+cu118，Ultralytics 更新為 8.4.202，支援 YOLO11m-seg、YOLO11m、YOLO26m、YOLO26x 搭配 ViTPose（26 點）。主視窗「切換模型…」可直接切換，並保留原始影片、清除舊模型分析結果。
+
 人體骨架分析系統，整合 YOLOv11 物件偵測、ViTPose 骨架姿態估計（26 關節點）與 BoTSORT 多目標追蹤，以 PyQt5 GUI 呈現，可對運動影片進行骨架偵測與關節點追蹤。
 
 ---
@@ -132,7 +134,7 @@ cd C:/Workspace/Skeleton-User-Interface
 python Src/UI_Control/main.py
 ```
 
-模型、設定檔、字型與輸出位置依程式檔案位置解析，不需切換到 `Src/UI_Control`。從其他工作目錄也可用 `main.py` 的絕對路徑啟動；輸出固定放在此專案的 `Db/Record`。在 IDE 中選用已安裝相依套件的 Python 解譯器即可，程式不再依賴 `CONDA_PREFIX` 設定 Qt 路徑。
+模型、設定檔、字型與輸出位置依程式檔案位置解析，不需切換到 `Src/UI_Control`。從其他工作目錄也可用 `main.py` 的絕對路徑啟動；輸出固定放在此專案的 `Results`。在 IDE 中選用已安裝相依套件的 Python 解譯器即可，程式不再依賴 `CONDA_PREFIX` 設定 Qt 路徑。
 
 如需自動檢查主視窗、模型權重與 Qt 事件迴圈是否能初始化，可在相同目錄執行以下指令；它不顯示視窗，約一秒後結束事件迴圈（模型載入另需時間）：
 
@@ -142,7 +144,7 @@ python -c "import sys; sys.path.insert(0,'Src/UI_Control'); from PyQt5.QtWidgets
 Remove-Item Env:QT_QPA_PLATFORM
 ```
 
-回歸測試可從專案根目錄執行 `python -m unittest discover -s tests -v`。測試使用臨時資料，不覆寫 `Db/Record`。
+回歸測試可從專案根目錄執行 `python -m unittest discover -s tests -v`。測試使用臨時資料，不覆寫 `Results`。
 
 ---
 
@@ -181,7 +183,7 @@ Remove-Item Env:QT_QPA_PLATFORM
 |------|------|
 | **載入原始影片** | 開啟檔案選擇對話框，載入未處理的 MP4 影片。影片載入後會自動逐幀解析並顯示第 0 幀。 |
 | **載入資料夾** | 選擇資料夾後，依檔名順序自動分析第一層所有支援的影片，顯示進度並支援取消。 |
-| **處理和儲存** | 同時勾選「人體骨架」與「人物框」，從第 0 幀開始處理；抵達最後一幀後補做尚未處理的影格，再將原畫面影片、人物框＋骨架影片（`_Sk26.mp4`）、JSON 與 CSV 儲存至 `Db/Record/{影片名稱}/`。 |
+| **處理和儲存** | 同時勾選「人體骨架」與「人物框」，從第 0 幀開始處理；抵達最後一幀後補做尚未處理的影格，再將原畫面影片、人物框＋骨架影片（`_Sk26.mp4`）、JSON 與 CSV 儲存至 `Results/{影片名稱}/`。 |
 | **載入處理過的影片** | 載入影片及對應的骨架 JSON，直接顯示人物框與骨架，不重新執行模型；支援原畫面影片與 `_Sk26.mp4`。 |
 
 #### 播放控制區
@@ -236,7 +238,7 @@ Remove-Item Env:QT_QPA_PLATFORM
 
 - 點擊「**處理和儲存**」後抵達最後一幀會自動儲存；一般預覽或選人不會自行觸發儲存
 - 儲存前會補做尚未處理的影格，這個階段可能需要等待
-- 輸出檔案儲存至 `Db/Record/{影片名稱}/` 資料夾，同名檔案會覆寫
+- 輸出檔案儲存至 `Results/{影片名稱}/` 資料夾，同名檔案會覆寫
 
 **⑤ 檢視輸出與重新載入**
 
@@ -254,7 +256,7 @@ Remove-Item Env:QT_QPA_PLATFORM
 
 - 分析資料夾第一層的 `.mp4`、`.avi`、`.mov`、`.mkv`、`.webm`、`.m4v`、`.mpg`、`.mpeg`、`.wmv`，副檔名不區分大小寫；不包含子資料夾。
 - 每支影片使用獨立的追蹤與骨架資料，對所有有效追蹤人物做 ViTPose 分析，不沿用單片預覽的選人設定。
-- 每支影片輸出至 `Db/Record/{影片名稱}/`，包含原畫面 MP4、人物框＋骨架 MP4、JSON 與 CSV。輸入檔若同名但副檔名不同，會在輸出名稱加上副檔名及必要的流水號，避免互相覆寫。
+- 每支影片輸出至 `Results/{影片名稱}/`，包含原畫面 MP4、人物框＋骨架 MP4、JSON 與 CSV。輸入檔若同名但副檔名不同，會在輸出名稱加上副檔名及必要的流水號，避免互相覆寫。
 - 批次期間會顯示影片與影格進度；預覽操作暫時停用，按「取消」可停止剩餘處理。已完成的影片會保留，當前尚未完成的暫存結果會清除。
 - 單支影片失敗後會繼續下一支，結束時顯示成功／失敗數及錯誤詳細資料。影片完整完成後才更新同名輸出檔。
 
@@ -282,7 +284,7 @@ Remove-Item Env:QT_QPA_PLATFORM
 
 ## 輸出格式
 
-分析完成後，結果儲存至 `Db/Record/{影片名稱}/`：
+分析完成後，結果儲存至 `Results/{影片名稱}/`：
 
 | 檔案 | 說明 |
 |------|------|

@@ -269,7 +269,7 @@ class PoseEstimater:
     def trackFrame(self, model, image, frame_num=None):
         if frame_num is not None and frame_num in self.tracked_frames:
             return self.tracked_frames[frame_num]
-        detections = model.detector.predict(image, task='segment', classes=[0])[0]
+        detections = model.detector.predict(image, classes=[0])[0]
         boxes = detections.boxes.xyxy.cpu().numpy()
         scores = detections.boxes.conf.cpu().numpy().reshape(-1, 1)
         tracker_input = np.hstack((boxes, scores, np.zeros((len(boxes), 1))))

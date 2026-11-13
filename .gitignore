@@ -178,3 +178,5 @@ Src/UI_Control/ui/video_ui_v1.ui
 Src/UI_Control/ui/widget3d.py
 Src/UI_Control/ui/camera_ui.*
 
+Results/
+Demo/

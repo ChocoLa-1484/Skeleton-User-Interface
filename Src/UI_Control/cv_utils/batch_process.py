@@ -3,15 +3,15 @@ import math
 import os
 import tempfile
 from pathlib import Path
+from time import perf_counter
 
 import cv2
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from cv_utils.cv_control import VideoLoader
-from skeleton.detect_skeleton import PoseEstimater
+from skeleton.backend import create_estimator
 from utils.paths import RECORD_ROOT
 from utils.vis_image import ImageDrawer
-from tracker.basetrack import BaseTrack
 
 
 VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg', '.wmv'}
@@ -48,17 +48,22 @@ class BatchAnalysisThread(QThread):
         self.model = model
         self.jobs = list(jobs)
         self.output_root = Path(output_root) if output_root is not None else RECORD_ROOT
-        self.result = {'completed': [], 'errors': [], 'cancelled': False}
+        self.result = {'completed': [], 'errors': [], 'cancelled': False, 'elapsed_seconds': 0.0}
 
     def check_cancelled(self):
         if self.isInterruptionRequested():
             raise BatchCancelled()
 
     def run(self):
+        started = perf_counter()
         # The GUI's loaded video can resume with its original tracker afterwards.
         original_tracker = self.model.tracker
         original_size = self.model.image_size
-        original_track_count = BaseTrack._count
+        base_track = None
+        if not hasattr(self.model, 'create_estimator'):
+            from tracker.basetrack import BaseTrack
+            base_track = BaseTrack
+        original_track_count = base_track._count if base_track is not None else None
         try:
             for index, (path, name) in enumerate(self.jobs, 1):
                 try:
@@ -74,7 +79,9 @@ class BatchAnalysisThread(QThread):
         finally:
             self.model.tracker = original_tracker
             self.model.image_size = original_size
-            BaseTrack._count = original_track_count
+            if base_track is not None:
+                base_track._count = original_track_count
+            self.result['elapsed_seconds'] = perf_counter() - started
 
     def analyze_video(self, path, name, index):
         self.output_root.mkdir(parents=True, exist_ok=True)
@@ -95,10 +102,10 @@ class BatchAnalysisThread(QThread):
                     raise ValueError('影片沒有可讀取的影格')
                 size = (frame.shape[1], frame.shape[0])
                 self.model.setImageSize(size)
-                estimator = PoseEstimater(self.model)
+                estimator = create_estimator(self.model)
                 estimator.setDetect(True)
                 drawer = ImageDrawer(estimator)
-                for suffix in ('', '_Sk26'):
+                for suffix in ('', getattr(estimator, 'video_suffix', '_Sk26')):
                     writer = cv2.VideoWriter(str(staging / f'{name}{suffix}.mp4'),
                                              cv2.VideoWriter_fourcc(*'mp4v'), fps, size)
                     writers.append(writer)

@@ -139,6 +139,11 @@ class VideoLoader:
 
 
     def video_to_frame(self, video_frames, fps, count):
+        if not video_frames or not np.isfinite(fps) or fps <= 0:
+            self.close_thread(self.v_t)
+            self.reset()
+            QMessageBox.warning(None, "無法載入影片", "影片沒有可讀取的影格或 FPS 無效。")
+            return
         self.total_frames = count
         self.video_frames = video_frames
         self.video_fps = fps
@@ -160,7 +165,8 @@ class VideoLoader:
         self.saveSkeletonData(output_folder)
 
         if process:
-            save_location = os.path.join(output_folder, f"{self.video_name}_Sk26.mp4")
+            suffix = getattr(self.image_drawer.pose_estimater, 'video_suffix', '_Sk26')
+            save_location = os.path.join(output_folder, f"{self.video_name}{suffix}.mp4")
         else: save_location = os.path.join(output_folder, f"{self.video_name}.mp4")
         video_writer = cv2.VideoWriter(save_location, cv2.VideoWriter_fourcc(*'mp4v'), self.video_fps, self.video_size)
 
@@ -200,7 +206,7 @@ class VideoLoader:
 
     def saveSkeletonCsv(self, csv_path: str):
         pose_estimater = self.image_drawer.pose_estimater
-        keypoint_names = pose_estimater.joints['haple']['keypoints']
+        keypoint_names = pose_estimater.joints[getattr(pose_estimater, 'layout', 'haple')]['keypoints']
         with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csv_file:
             writer = csv.writer(csv_file)
             writer.writerow([
@@ -240,7 +246,7 @@ class JsonLoader:
         if self.folder_path == None or self.file_name == None:
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         names = [self.file_name]
-        if self.file_name.endswith('_Sk26'):
+        if self.file_name.endswith(('_Sk26', '_Sk17')):
             names.insert(0, self.file_name[:-5])
         json_path = next((os.path.join(self.folder_path, f"{name}.json")
                           for name in names

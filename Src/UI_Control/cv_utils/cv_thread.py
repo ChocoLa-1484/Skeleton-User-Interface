@@ -10,7 +10,7 @@ from utils.timer import Timer
 
 
 class VideoToImagesThread(QThread):
-    emit_signal = pyqtSignal([list,int,int])   
+    emit_signal = pyqtSignal(list, float, int)
     _run_flag=True
     def __init__(self,video_path):
         super(VideoToImagesThread, self).__init__()
@@ -31,7 +31,7 @@ class VideoToImagesThread(QThread):
             success, image = vidcap.read()
             # frame_counter += 1
         vidcap.release()
-        fps = int(fps) >> 1
+        # Every frame is retained; preserve source FPS, including fractional rates.
         # set image count labels
         return video_images, fps, count
 

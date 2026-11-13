@@ -5,18 +5,19 @@ import numpy as np
 import sys
 import cv2
 import os
+from time import perf_counter
 from ui.video_ui import Ui_video_widget
 import pandas as pd
 from utils.vis_image import ImageDrawer
 from utils.selector import PersonSelector
 from cv_utils.cv_control import VideoLoader, JsonLoader
-from skeleton.detect_skeleton import PoseEstimater
-from utils.model import Model
+from skeleton.backend import create_estimator
 from utils.paths import PROJECT_ROOT
 from cv_utils.batch_process import BatchAnalysisThread, folder_jobs
+from utils.time_log import record_time, TIME_XLSX
 
 class PoseVideoTabControl(QWidget):
-    def __init__(self, model:Model, parent = None):
+    def __init__(self, model, parent = None):
         super(PoseVideoTabControl, self).__init__(parent)
         self.ui = Ui_video_widget()
         self.ui.setupUi(self)
@@ -84,14 +85,16 @@ class PoseVideoTabControl(QWidget):
 
     def setupComponents(self):
         self.person_selector = PersonSelector()
-        self.pose_estimater = PoseEstimater(self.model)
-        self.kpt_dict = self.pose_estimater.joints["haple"]["keypoints"]
+        self.pose_estimater = create_estimator(self.model)
+        layout = getattr(self.pose_estimater, 'layout', 'haple')
+        self.kpt_dict = self.pose_estimater.joints[layout]["keypoints"]
         self.image_drawer = ImageDrawer(self.pose_estimater)
-        self.video_loader = VideoLoader(self.image_drawer)
+        self.video_loader = VideoLoader(self.image_drawer, getattr(self.model, 'output_root', None))
 
     def init_var(self):
         self.is_play = False
         self.is_processing = False
+        self.analysis_started = None
         self.video_scene = QGraphicsScene()
         self.video_scene.clear()
         self.correct_kpt_idx = 0
@@ -103,6 +106,7 @@ class PoseVideoTabControl(QWidget):
 
     def reset(self):
         self.is_processing = False
+        self.analysis_started = None
         self.person_selector.reset()
         self.pose_estimater.reset()
         self.image_drawer.reset()
@@ -144,12 +148,12 @@ class PoseVideoTabControl(QWidget):
         self.is_processing = False
         self.setBatchControlsEnabled(False)
         self.batch_progress = QProgressDialog("準備批次分析…", "取消", 0, len(jobs) * 100, self)
-        self.batch_progress.setWindowTitle("ViTPose 資料夾分析")
+        self.batch_progress.setWindowTitle(getattr(self.model, 'display_name', 'ViTPose') + " 資料夾分析")
         self.batch_progress.setWindowModality(Qt.WindowModal)
         self.batch_progress.setAutoClose(False)
         self.batch_progress.setAutoReset(False)
         self.batch_progress.setMinimumDuration(0)
-        self.batch_worker = BatchAnalysisThread(self.model, jobs, parent=self)
+        self.batch_worker = BatchAnalysisThread(self.model, jobs, output_root=getattr(self.model, 'output_root', None), parent=self)
         self.batch_worker.progress.connect(self.updateBatchProgress)
         self.batch_worker.finished.connect(self.finishBatch)
         self.batch_progress.canceled.connect(self.batch_worker.requestInterruption)
@@ -176,7 +180,10 @@ class PoseVideoTabControl(QWidget):
         self.batch_worker = None
         if self.closing_after_batch:
             return
-        message = f"完成 {len(result['completed'])} 支，失敗 {len(result['errors'])} 支。"
+        elapsed = self.showElapsedTime(result['elapsed_seconds'])
+        message = f"完成 {len(result['completed'])} 支，失敗 {len(result['errors'])} 支。\n總耗時：{elapsed}（含讀取、分析與儲存）"
+        if result['completed'] and not result['cancelled']:
+            message += "\n" + self.recordTime(result['elapsed_seconds'])
         if result['cancelled']:
             message += "\n已取消剩餘影片，已完成的輸出會保留。"
         if result['errors']:
@@ -185,6 +192,34 @@ class PoseVideoTabControl(QWidget):
             dialog.exec_()
         else:
             QMessageBox.information(self, "批次分析結果", message)
+
+    def showElapsedTime(self, seconds):
+        minutes, seconds = divmod(max(0.0, seconds), 60)
+        hours, minutes = divmod(int(minutes), 60)
+        text = f'{hours:02d}:{minutes:02d}:{seconds:05.2f}'
+        window = self.window()
+        if hasattr(window, 'statusBar'):
+            window.statusBar().showMessage(
+                getattr(self.model, 'display_name', '姿態分析') + ' ｜ 上次處理耗時：' + text)
+        return text
+
+    def finishAnalysisTimer(self, record=False):
+        seconds = perf_counter() - self.analysis_started if self.analysis_started is not None else 0.0
+        self.analysis_started = None
+        text = self.showElapsedTime(seconds)
+        if record:
+            text += "\n" + self.recordTime(seconds)
+        return text
+
+    def recordTime(self, seconds):
+        name = getattr(getattr(self.model, 'output_root', None), 'name', None) or getattr(self.model, 'display_name', 'model')
+        try:
+            text = record_time(name, seconds)
+        except PermissionError:
+            return f'無法寫入 {TIME_XLSX.name}（檔案可能正在 Excel 中開啟）'
+        except Exception as error:
+            return f'寫入 {TIME_XLSX.name} 失敗：{error}'
+        return f'已寫入 {TIME_XLSX.name}：{name} = {text}'
 
     def checkVideoLoad(self):
         if not self.video_loader.video_name:
@@ -268,9 +303,19 @@ class PoseVideoTabControl(QWidget):
         frame_num = self.ui.frameSlider.value()
         self.ui.frameNumLabel.setText(f'{frame_num}/{len(self.video_loader.video_frames) - 1}')
         frame = self.video_loader.getVideoImage(frame_num)
-        if not self.is_processed and self.pose_estimater.is_detect:
-            self.pose_estimater.ensureTrackedThrough(self.video_loader.video_frames, frame_num)
-        _, _, fps, _ = self.pose_estimater.detectKpt(frame, frame_num, is_video=True, is_processed=self.is_processed)
+        try:
+            if not self.is_processed and self.pose_estimater.is_detect:
+                self.pose_estimater.ensureTrackedThrough(self.video_loader.video_frames, frame_num)
+            _, _, fps, _ = self.pose_estimater.detectKpt(frame, frame_num, is_video=True, is_processed=self.is_processed)
+        except Exception as error:
+            self.is_play = False
+            self.is_processing = False
+            self.pose_estimater.setDetect(False)
+            self.ui.playBtn.setText("▶︎")
+            elapsed = self.finishAnalysisTimer() if self.analysis_started is not None else None
+            message = str(error) + (f'\n已耗時：{elapsed}' if elapsed is not None else '')
+            QMessageBox.warning(self, "姿態分析失敗", message)
+            return
         self.ui.FPSInfoLabel.setText(str(fps) if not self.is_processed else "—")
         if self.is_processing and not self.is_processed and frame_num == self.video_loader.total_frames - 1:
             self.is_processing = False
@@ -280,7 +325,14 @@ class PoseVideoTabControl(QWidget):
             except (OSError, ValueError) as error:
                 self.is_play = False
                 self.ui.playBtn.setText("▶︎")
-                QMessageBox.warning(self, "儲存失敗", str(error))
+                elapsed = self.finishAnalysisTimer()
+                QMessageBox.warning(self, "儲存失敗", str(error) + f'\n已耗時：{elapsed}')
+            else:
+                elapsed = self.finishAnalysisTimer(record=True)
+                self.is_play = False
+                self.ui.playBtn.setText("▶︎")
+                QMessageBox.information(self, "影片分析完成",
+                    f'{self.video_loader.video_name}\n總耗時：{elapsed}（含分析與儲存）')
         self.updateFrame(frame_num)
 
     def updateFrame(self, frame_num:int):
@@ -303,6 +355,7 @@ class PoseVideoTabControl(QWidget):
         if self.is_processed:
             QMessageBox.information(self, "已載入骨架資料", "目前使用已儲存的骨架。若要重新偵測與儲存，請以「載入原始影片」開啟影片。")
             return
+        self.analysis_started = perf_counter()
         self.ui.showSkeletonCheckBox.setChecked(True)
         self.ui.showBboxCheckBox.setChecked(True)
         self.pose_estimater.setDetect(True)
@@ -311,7 +364,8 @@ class PoseVideoTabControl(QWidget):
             self.analyzeFrame()
         else:
             self.ui.frameSlider.setValue(0)
-        self.ui.playBtn.click()
+        if self.is_processing:
+            self.ui.playBtn.click()
 
     def toggleSelect(self, state:int):
         if self.video_loader.is_loading or not self.video_loader.video_frames:

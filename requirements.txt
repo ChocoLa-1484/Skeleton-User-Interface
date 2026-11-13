@@ -14,7 +14,10 @@ torchaudio==2.0.2+cu118
 mmcv==2.0.0
 mmengine==0.10.7
 mmdet==3.1.0
-ultralytics==8.3.96
+ultralytics==8.4.202
+ultralytics-thop==2.2.5
+polars==1.8.2
+nvidia-ml-py==13.615.71
 
 # Image processing and numerical libraries
 numpy==1.24.4
@@ -25,6 +28,7 @@ matplotlib==3.7.5
 scikit-image==0.21.0
 scikit-learn==1.3.2
 pandas==2.0.3
+openpyxl==3.1.2
 
 # PyQt GUI
 PyQt5==5.15.11

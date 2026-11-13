@@ -30,7 +30,7 @@ python main.py
 | mmengine | 0.10.7 |
 | mmdet | 3.1.0 |
 | mmpretrain | 1.2.0（editable，來自本專案 `Src/mmpretrain_main`） |
-| ultralytics | 8.3.96 |
+| ultralytics | 8.4.202（整合 YOLO11／YOLO26） |
 | PyQt5 | 5.15.11 |
 | opencv-python | 4.8.1.78 |
 
@@ -39,7 +39,10 @@ python main.py
 ```
 Db/pretrain/
 ├── epoch_210.pth          # ViTPose 姿態估計模型（HALPE 26 關節點）
-└── yolo11m-seg.pt         # YOLOv11 人體偵測模型
+├── yolo11m-seg.pt         # YOLO11 人體偵測模型（預設）
+├── yolo11m.pt
+├── yolo26m.pt
+└── yolo26x.pt
 ```
 
 ## 程式入口與架構

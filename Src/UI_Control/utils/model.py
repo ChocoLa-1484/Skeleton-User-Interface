@@ -1,7 +1,8 @@
 from argparse import ArgumentParser
 import argparse
 import sys
-from utils.paths import SRC_ROOT, PRETRAIN_ROOT
+from pathlib import Path
+from utils.paths import SRC_ROOT, PRETRAIN_ROOT, RECORD_ROOT
 from ultralytics import YOLO
 sys.path.append(str(SRC_ROOT / 'tracker'))
 from tracker.mc_bot_sort import BoTSORT
@@ -10,11 +11,24 @@ from mmpose.apis import init_model as init_pose_estimator
 
 
 class Model(object):
-    def __init__(self):
+    def __init__(self, detector_weights=None, pose_checkpoint=None, argv=None):
+        self.argv = argv
         self.detect_args_yolo = self.setDetectParserYolo()
         self.pose_args = self.setPoseParser()
         self.tracker_args = self.setTrackerParser()
+        if detector_weights is not None:
+            self.detect_args_yolo.model = str(detector_weights)
+        if pose_checkpoint is not None:
+            self.pose_args.pose_checkpoint = str(pose_checkpoint)
+        if not Path(self.pose_args.pose_checkpoint).is_file():
+            raise FileNotFoundError('找不到 ViTPose 權重：' + self.pose_args.pose_checkpoint)
+        detector_path = Path(self.detect_args_yolo.model)
+        detector_path.parent.mkdir(parents=True, exist_ok=True)
+        self.display_name = detector_path.stem + ' + ViTPose'
+        self.output_root = RECORD_ROOT / (detector_path.stem + '_ViTPose')
         self.detector = YOLO(self.detect_args_yolo.model)
+        if self.detector.task not in ('detect', 'segment'):
+            raise ValueError('ViTPose 前端請選擇 detect 或 segment 人體偵測權重。')
         self.pose_estimator = init_pose_estimator(
             self.pose_args.pose_config,
             self.pose_args.pose_checkpoint
@@ -27,7 +41,7 @@ class Model(object):
         parser.add_argument('--model', type=str, default=str(PRETRAIN_ROOT / 'yolo11m-seg.pt'))
         parser.add_argument('--conf-thres', type=float, default=0.3)
         parser.add_argument('--iou-thres', type=float, default=0.3)
-        return parser.parse_args()
+        return parser.parse_known_args(self.argv)[0]
 
     def setPoseParser(self) -> ArgumentParser:
         parser = ArgumentParser()
@@ -38,7 +52,7 @@ class Model(object):
         parser.add_argument('--show-kpt-idx', action='store_true', default=False)
         parser.add_argument('--skeleton-style', default='mmpose', type=str, choices=['mmpose', 'openpose'])
         parser.add_argument('--radius', type=int, default=3)
-        return parser.parse_args()
+        return parser.parse_known_args(self.argv)[0]
 
     def setTrackerParser(self) -> ArgumentParser:
         parser = ArgumentParser()
@@ -56,7 +70,7 @@ class Model(object):
         parser.add_argument("--fast-reid-weights", dest="fast_reid_weights", default=str(SRC_ROOT / 'tracker/fast_reid/mot17_sbs_S50.pth'), type=str)
         parser.add_argument('--proximity_thresh', type=float, default=0.5)
         parser.add_argument('--appearance_thresh', type=float, default=0.25)
-        tracker_args = parser.parse_args()
+        tracker_args = parser.parse_known_args(self.argv)[0]
         tracker_args.jde = False
         tracker_args.ablation = False
         return tracker_args
